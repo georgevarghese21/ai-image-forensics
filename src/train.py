@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--config", default="configs/v1.yaml")
     ap.add_argument("--model", default=None)
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--augment", action="store_true",
+                    help="override config: force augmentation on")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -44,6 +46,7 @@ def main():
 
     model_name = args.model or cfg["model"]["name"]
     tag = args.tag or model_name
+    augment = args.augment or cfg["data"].get("augment", False)
 
     manifest = Path(cfg["data"]["manifest"])
     root = manifest.parent
@@ -58,13 +61,15 @@ def main():
         train_gens = sorted(all_gens - set(holdout))
         print(f"holding out {holdout} | training on {train_gens}")
 
+    # Validation stays clean and deterministic - augmenting it would make
+    # scores move for reasons unrelated to the model.
     train_ds = ForensicDataset(manifest, root, split="train", generators=train_gens,
-                               crop=crop, train=True)
+                               crop=crop, train=True, augment=augment)
     val_ds = ForensicDataset(manifest, root, split="val", generators=train_gens,
                              crop=crop, train=False)
     if len(train_ds) == 0:
         raise SystemExit("empty training set - check the manifest path")
-    print(f"train {len(train_ds)} | val {len(val_ds)} | device {device}")
+    print(f"train {len(train_ds)} | val {len(val_ds)} | device {device} | augment {augment}")
 
     nw = cfg["data"]["num_workers"]
     bs = cfg["train"]["batch_size"]
@@ -110,7 +115,8 @@ def main():
             best_auc, patience = m["roc_auc"], 0
             torch.save({"model": model_name, "state_dict": model.state_dict(),
                         "crop": crop, "val_roc_auc": best_auc,
-                        "train_generators": train_gens}, out_dir / "best.pt")
+                        "train_generators": train_gens, "augment": augment},
+                       out_dir / "best.pt")
         else:
             patience += 1
             if patience >= cfg["train"]["early_stop_patience"]:
@@ -119,7 +125,8 @@ def main():
 
     (out_dir / "history.json").write_text(json.dumps(
         {"tag": tag, "model": model_name, "config": cfg, "holdout": holdout,
-         "best_val_roc_auc": best_auc, "history": history}, indent=2))
+         "augment": augment, "best_val_roc_auc": best_auc, "history": history},
+        indent=2))
     print(f"\nbest val ROC-AUC {best_auc:.4f} -> {out_dir / 'best.pt'}")
 
 

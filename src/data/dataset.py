@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 from torch.utils.data import Dataset
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -29,13 +29,14 @@ def to_tensor(im):
 class ForensicDataset(Dataset):
     """Reads a manifest slice and yields (tensor, label).
 
-    perturbation: eval-time only. Simulates what happens to an image that has
-    been screenshotted, resized by a messaging app, or re-uploaded to social
-    media. e.g. {"jpeg": 50}, {"scale": 0.5}, {"blur": 1.5}
+    perturbation: eval-time only. Fixed degradation applied to every image,
+        used by the robustness sweep. e.g. {"jpeg": 50}, {"scale": 0.5}
+    augment: train-time only. Random JPEG and blur, so the model learns
+        features that survive real-world compression.
     """
 
     def __init__(self, manifest, root, split=None, generators=None, crop=224,
-                 train=False, perturbation=None):
+                 train=False, perturbation=None, augment=False):
         df = pd.read_csv(manifest)
         if split is not None:
             df = df[df["split"] == split]
@@ -48,12 +49,13 @@ class ForensicDataset(Dataset):
         self.crop = crop
         self.train = train
         self.perturbation = perturbation or {}
+        self.augment = augment
 
     def __len__(self):
         return len(self.df)
 
     def _perturb(self, im):
-        """Degrade the image before cropping, mirroring real-world handling."""
+        """Fixed degradation before cropping, mirroring real-world handling."""
         p = self.perturbation
         if "scale" in p:
             w, h = im.size
@@ -68,13 +70,27 @@ class ForensicDataset(Dataset):
             im = Image.open(buf).convert("RGB")
         return im
 
+    def _augment(self, im):
+        """Random JPEG and blur during training (the CNNSpot recipe).
+
+        The model otherwise only ever sees clean quality-95 images and has no
+        chance to learn features that survive real-world compression.
+        """
+        if random.random() < 0.5:
+            im = im.filter(ImageFilter.GaussianBlur(random.uniform(0.0, 3.0)))
+        if random.random() < 0.5:
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=random.randint(30, 100))
+            buf.seek(0)
+            im = Image.open(buf).convert("RGB")
+        return im
+
     def _crop(self, im):
         w, h = im.size
         c = self.crop
         # A downscaled image can end up smaller than the crop; pad by
         # reflection rather than upscaling, which would add its own artefacts.
         if w < c or h < c:
-            from PIL import ImageOps
             im = ImageOps.expand(im, border=(max(0, (c - w + 1) // 2),
                                              max(0, (c - h + 1) // 2)))
             w, h = im.size
@@ -95,5 +111,7 @@ class ForensicDataset(Dataset):
             im = self._crop(im)
             if self.train and random.random() < 0.5:
                 im = im.transpose(Image.FLIP_LEFT_RIGHT)
+            if self.train and self.augment:
+                im = self._augment(im)
             tensor = to_tensor(im)
         return tensor, torch.tensor(float(row["label"]))
