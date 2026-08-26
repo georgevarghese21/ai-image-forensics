@@ -3,13 +3,14 @@
 Design rule: CROP, NEVER RESIZE. Generator artefacts live in high
 frequencies; resizing resamples them away.
 """
+import io
 import random
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -26,7 +27,15 @@ def to_tensor(im):
 
 
 class ForensicDataset(Dataset):
-    def __init__(self, manifest, root, split=None, generators=None, crop=224, train=False):
+    """Reads a manifest slice and yields (tensor, label).
+
+    perturbation: eval-time only. Simulates what happens to an image that has
+    been screenshotted, resized by a messaging app, or re-uploaded to social
+    media. e.g. {"jpeg": 50}, {"scale": 0.5}, {"blur": 1.5}
+    """
+
+    def __init__(self, manifest, root, split=None, generators=None, crop=224,
+                 train=False, perturbation=None):
         df = pd.read_csv(manifest)
         if split is not None:
             df = df[df["split"] == split]
@@ -38,13 +47,37 @@ class ForensicDataset(Dataset):
         self.root = Path(root)
         self.crop = crop
         self.train = train
+        self.perturbation = perturbation or {}
 
     def __len__(self):
         return len(self.df)
 
+    def _perturb(self, im):
+        """Degrade the image before cropping, mirroring real-world handling."""
+        p = self.perturbation
+        if "scale" in p:
+            w, h = im.size
+            im = im.resize((max(1, int(w * p["scale"])),
+                            max(1, int(h * p["scale"]))), Image.BICUBIC)
+        if "blur" in p:
+            im = im.filter(ImageFilter.GaussianBlur(p["blur"]))
+        if "jpeg" in p:
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=int(p["jpeg"]))
+            buf.seek(0)
+            im = Image.open(buf).convert("RGB")
+        return im
+
     def _crop(self, im):
         w, h = im.size
         c = self.crop
+        # A downscaled image can end up smaller than the crop; pad by
+        # reflection rather than upscaling, which would add its own artefacts.
+        if w < c or h < c:
+            from PIL import ImageOps
+            im = ImageOps.expand(im, border=(max(0, (c - w + 1) // 2),
+                                             max(0, (c - h + 1) // 2)))
+            w, h = im.size
         if self.train:
             left = random.randint(0, max(0, w - c))
             top = random.randint(0, max(0, h - c))
@@ -56,6 +89,9 @@ class ForensicDataset(Dataset):
         row = self.df.iloc[idx]
         with Image.open(self.root / row["path"]) as raw:
             im = raw.convert("RGB")
+            # Degrade first, then crop - the order a real image goes through.
+            if self.perturbation:
+                im = self._perturb(im)
             im = self._crop(im)
             if self.train and random.random() < 0.5:
                 im = im.transpose(Image.FLIP_LEFT_RIGHT)

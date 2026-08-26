@@ -1,9 +1,10 @@
 """Evaluate a checkpoint on the test split.
 
     python -m src.evaluate --checkpoint experiments/rn18_debiased/best.pt
+    python -m src.evaluate --checkpoint experiments/rn18_debiased/best.pt --robustness
 
-Prints headline metrics plus a per-generator breakdown. Generators absent
-from training are marked NO - that column is the generalisation result.
+Prints headline metrics, a per-generator breakdown (generators absent from
+training are marked NO), and optionally a robustness sweep.
 """
 import argparse
 import json
@@ -18,10 +19,23 @@ from src.models.nets import build_model
 from src.train import evaluate_loader
 from src.utils import compute_metrics, get_device, load_config, set_seed
 
+# Eval-time degradations standing in for real-world image handling.
+PERTURBATIONS = {
+    "original": {},
+    "jpeg_90": {"jpeg": 90},
+    "jpeg_70": {"jpeg": 70},
+    "jpeg_50": {"jpeg": 50},
+    "jpeg_30": {"jpeg": 30},
+    "resize_75": {"scale": 0.75},
+    "resize_50": {"scale": 0.50},
+    "blur_1.5": {"blur": 1.5},
+    "screenshot": {"scale": 0.8, "jpeg": 60},
+}
 
-def run(model, manifest, root, crop, device, batch, generators=None):
+
+def run(model, manifest, root, crop, device, batch, generators=None, perturbation=None):
     ds = ForensicDataset(manifest, root, split="test", generators=generators,
-                         crop=crop, train=False)
+                         crop=crop, train=False, perturbation=perturbation)
     if len(ds) == 0:
         return None, None
     ld = DataLoader(ds, batch_size=batch, shuffle=False, num_workers=2)
@@ -32,6 +46,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/v1.yaml")
     ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--robustness", action="store_true")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -75,6 +90,17 @@ def main():
         per_gen[g] = {**m, "seen_in_training": g in trained_on}
         print(f"  {g:<14}{seen:<7}{m['n']:<7}{m['accuracy']:<9.4f}{m['roc_auc']:.4f}")
     results["per_generator"] = per_gen
+
+    if args.robustness:
+        print("\n=== ROBUSTNESS ===")
+        print(f"  {'transformation':<16}{'acc':<9}{'roc_auc'}")
+        sweep = {}
+        for name, pert in PERTURBATIONS.items():
+            yt, yp = run(model, manifest, root, crop, device, batch, perturbation=pert)
+            m = compute_metrics(yt, yp)
+            sweep[name] = m
+            print(f"  {name:<16}{m['accuracy']:<9.4f}{m['roc_auc']:.4f}")
+        results["robustness"] = sweep
 
     out = Path(args.checkpoint).parent / "results.json"
     out.write_text(json.dumps(results, indent=2))
