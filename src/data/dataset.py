@@ -54,13 +54,25 @@ class ForensicDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
+    def _rescale(self, im, s):
+        """Downscale by factor s, then restore the original dimensions.
+
+        A plain downscale can drop the image below the crop size, triggering
+        the reflection padding in _crop. Those padding artefacts look like
+        synthetic high-frequency structure and saturate the classifier, so the
+        measurement reports the preprocessing rather than the detector.
+        Restoring the size destroys the same detail a real resize would while
+        keeping the tensor shape the network expects.
+        """
+        w, h = im.size
+        im = im.resize((max(1, int(w * s)), max(1, int(h * s))), Image.BICUBIC)
+        return im.resize((w, h), Image.BICUBIC)
+
     def _perturb(self, im):
         """Fixed degradation before cropping, mirroring real-world handling."""
         p = self.perturbation
         if "scale" in p:
-            w, h = im.size
-            im = im.resize((max(1, int(w * p["scale"])),
-                            max(1, int(h * p["scale"]))), Image.BICUBIC)
+            im = self._rescale(im, p["scale"])
         if "blur" in p:
             im = im.filter(ImageFilter.GaussianBlur(p["blur"]))
         if "jpeg" in p:
@@ -74,9 +86,9 @@ class ForensicDataset(Dataset):
         """Random degradation during training (CNNSpot recipe, plus rescale).
 
         The model otherwise only ever sees clean quality-95 images and has no
-        chance to learn features that survive real-world handling. Note the
-        gain is specific to the degradations applied here - see the robustness
-        table for what happens to transformations absent from this list.
+        chance to learn features that survive real-world handling. The gain is
+        specific to the degradations applied here - see the robustness table
+        for what happens to transformations absent from this list.
 
         Order mirrors what a real image goes through: optical softness, then
         platform resizing, then final compression.
@@ -84,13 +96,7 @@ class ForensicDataset(Dataset):
         if random.random() < 0.5:
             im = im.filter(ImageFilter.GaussianBlur(random.uniform(0.0, 3.0)))
         if random.random() < 0.5:
-            # Downscale then restore. Augmentation runs after cropping, so the
-            # tensor must stay crop x crop; scaling down and back up destroys
-            # the same high-frequency detail a real resize would.
-            w, h = im.size
-            s = random.uniform(0.4, 0.9)
-            im = im.resize((max(1, int(w * s)), max(1, int(h * s))), Image.BICUBIC)
-            im = im.resize((w, h), Image.BICUBIC)
+            im = self._rescale(im, random.uniform(0.4, 0.9))
         if random.random() < 0.5:
             buf = io.BytesIO()
             im.save(buf, format="JPEG", quality=random.randint(30, 100))
@@ -101,8 +107,9 @@ class ForensicDataset(Dataset):
     def _crop(self, im):
         w, h = im.size
         c = self.crop
-        # A downscaled image can end up smaller than the crop; pad by
-        # reflection rather than upscaling, which would add its own artefacts.
+        # Fallback only: pad by reflection rather than upscaling. Reaching this
+        # branch means the source image is smaller than the crop, which
+        # introduces artefacts - see _rescale.
         if w < c or h < c:
             im = ImageOps.expand(im, border=(max(0, (c - w + 1) // 2),
                                              max(0, (c - h + 1) // 2)))
