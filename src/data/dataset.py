@@ -26,10 +26,14 @@ def to_tensor(im):
 
 
 class ForensicDataset(Dataset):
-    def __init__(self, manifest, root, split=None, crop=224, train=False):
+    def __init__(self, manifest, root, split=None, generators=None, crop=224, train=False):
         df = pd.read_csv(manifest)
         if split is not None:
             df = df[df["split"] == split]
+        # Filter which FAKE generators appear; always keep every real image,
+        # since reals are the constant the fakes are measured against.
+        if generators is not None:
+            df = df[(df["label"] == 0) | (df["generator"].isin(generators))]
         self.df = df.reset_index(drop=True)
         self.root = Path(root)
         self.crop = crop

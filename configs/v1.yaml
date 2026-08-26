@@ -17,3 +17,4 @@ train:
   early_stop_patience: 3
 
 output_dir: experiments
+holdout_generators: []

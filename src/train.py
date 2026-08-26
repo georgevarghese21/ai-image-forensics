@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -25,7 +26,7 @@ def evaluate_loader(model, loader, device):
     probs, labels = [], []
     for x, y in tqdm(loader, desc="eval", leave=False):
         logits = model(x.to(device))
-        probs.append(torch.sigmoid(logits).cpu().numpy())   # score -> probability
+        probs.append(torch.sigmoid(logits).cpu().numpy())
         labels.append(y.numpy())
     return np.concatenate(labels), np.concatenate(probs)
 
@@ -48,10 +49,19 @@ def main():
     root = manifest.parent
     crop = cfg["data"]["crop"]
 
-    # train=True: random crops and flips, so each epoch sees slight variety.
-    # train=False: deterministic centre crop, so scores are repeatable.
-    train_ds = ForensicDataset(manifest, root, split="train", crop=crop, train=True)
-    val_ds = ForensicDataset(manifest, root, split="val", crop=crop, train=False)
+    # Leave-one-generator-out: exclude the held-out generators from training
+    # and validation entirely, so the test on them is genuinely unseen.
+    holdout = cfg.get("holdout_generators") or []
+    train_gens = None
+    if holdout:
+        all_gens = set(pd.read_csv(manifest).query("label == 1")["generator"].unique())
+        train_gens = sorted(all_gens - set(holdout))
+        print(f"holding out {holdout} | training on {train_gens}")
+
+    train_ds = ForensicDataset(manifest, root, split="train", generators=train_gens,
+                               crop=crop, train=True)
+    val_ds = ForensicDataset(manifest, root, split="val", generators=train_gens,
+                             crop=crop, train=False)
     if len(train_ds) == 0:
         raise SystemExit("empty training set - check the manifest path")
     print(f"train {len(train_ds)} | val {len(val_ds)} | device {device}")
@@ -99,7 +109,8 @@ def main():
         if m["roc_auc"] > best_auc:
             best_auc, patience = m["roc_auc"], 0
             torch.save({"model": model_name, "state_dict": model.state_dict(),
-                        "crop": crop, "val_roc_auc": best_auc}, out_dir / "best.pt")
+                        "crop": crop, "val_roc_auc": best_auc,
+                        "train_generators": train_gens}, out_dir / "best.pt")
         else:
             patience += 1
             if patience >= cfg["train"]["early_stop_patience"]:
@@ -107,7 +118,7 @@ def main():
                 break
 
     (out_dir / "history.json").write_text(json.dumps(
-        {"tag": tag, "model": model_name, "config": cfg,
+        {"tag": tag, "model": model_name, "config": cfg, "holdout": holdout,
          "best_val_roc_auc": best_auc, "history": history}, indent=2))
     print(f"\nbest val ROC-AUC {best_auc:.4f} -> {out_dir / 'best.pt'}")
 
