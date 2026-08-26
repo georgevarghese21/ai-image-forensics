@@ -31,8 +31,8 @@ class ForensicDataset(Dataset):
 
     perturbation: eval-time only. Fixed degradation applied to every image,
         used by the robustness sweep. e.g. {"jpeg": 50}, {"scale": 0.5}
-    augment: train-time only. Random JPEG and blur, so the model learns
-        features that survive real-world compression.
+    augment: train-time only. Random blur, rescale and JPEG, so the model
+        learns features that survive real-world handling.
     """
 
     def __init__(self, manifest, root, split=None, generators=None, crop=224,
@@ -71,13 +71,26 @@ class ForensicDataset(Dataset):
         return im
 
     def _augment(self, im):
-        """Random JPEG and blur during training (the CNNSpot recipe).
+        """Random degradation during training (CNNSpot recipe, plus rescale).
 
         The model otherwise only ever sees clean quality-95 images and has no
-        chance to learn features that survive real-world compression.
+        chance to learn features that survive real-world handling. Note the
+        gain is specific to the degradations applied here - see the robustness
+        table for what happens to transformations absent from this list.
+
+        Order mirrors what a real image goes through: optical softness, then
+        platform resizing, then final compression.
         """
         if random.random() < 0.5:
             im = im.filter(ImageFilter.GaussianBlur(random.uniform(0.0, 3.0)))
+        if random.random() < 0.5:
+            # Downscale then restore. Augmentation runs after cropping, so the
+            # tensor must stay crop x crop; scaling down and back up destroys
+            # the same high-frequency detail a real resize would.
+            w, h = im.size
+            s = random.uniform(0.4, 0.9)
+            im = im.resize((max(1, int(w * s)), max(1, int(h * s))), Image.BICUBIC)
+            im = im.resize((w, h), Image.BICUBIC)
         if random.random() < 0.5:
             buf = io.BytesIO()
             im.save(buf, format="JPEG", quality=random.randint(30, 100))
