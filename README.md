@@ -162,6 +162,10 @@ scene-recognition concern raised in Limitations. It does not settle it.
 is 7x7 upscaled 32x, so it indicates coarse regions only, while generation
 artefacts are fine-grained and often global. Diffuse heatmaps are expected.
 
+
+![Grad-CAM examples](docs/gradcam/Midjourney_Midjourney_00434.png)
+
+
 ### Robustness to real-world transformations
 
 Accuracy on the test set after applying each transformation at evaluation time.
