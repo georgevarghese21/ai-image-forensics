@@ -135,6 +135,33 @@ the held-out generator has no close relative in training. Absolute performance
 remains high (0.975 worst case), so the unseen-generator penalty measured here
 is real but mild.
 
+## Explainability
+
+Grad-CAM heatmaps over the final convolutional layer, from the
+JPEG+blur-augmented model. Red indicates regions whose activation
+increased the AI-generated score.
+
+| Image | Source | P(AI) |
+|---|---|---|
+| Real_00745 | real photograph | 0.0000 |
+| Real_01437 | real photograph | 0.7987 |
+| Midjourney_00434 | Midjourney | 0.9997 |
+| SD15_00267 | SD15 | 0.9993 |
+| ADM_00384 | ADM | 0.9997 |
+
+`Real_01437` is a false positive: a photograph of a starfish scored 0.799.
+The heatmap concentrates on the animal's textured ridges — the highest-
+frequency region of the image. High-frequency natural texture appears
+capable of triggering the same response as generation artefacts.
+
+Synthetic examples show attention on texture boundaries (fur edges, plumage)
+rather than on whole recognisable objects, which is weak evidence against the
+scene-recognition concern raised in Limitations. It does not settle it.
+
+**Grad-CAM shows where the model was sensitive, not why it decided.** The map
+is 7x7 upscaled 32x, so it indicates coarse regions only, while generation
+artefacts are fine-grained and often global. Diffuse heatmaps are expected.
+
 ### Robustness to real-world transformations
 
 Accuracy on the test set after applying each transformation at evaluation time.
