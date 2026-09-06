@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Image Forensics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --color-primary: #1E3A5F;
+    --color-secondary: #2563EB;
+    --color-accent: #059669;
+    --color-on-accent: #000000;
+    --color-background: #F8FAFC;
+    --color-foreground: #0F172A;
+    --color-card: #FFFFFF;
+    --color-muted: #F1F3F5;
+    --color-muted-foreground: #475569;
+    --color-border: #E4E7EB;
+    --color-destructive: #DC2626;
+    --color-destructive-bg: #FEF2F2;
+    --color-warning-bg: #FFFBEB;
+    --color-warning-border: #FDE68A;
+    --color-warning-text: #92400E;
+    --ring: #1E3A5F;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: 'Work Sans', system-ui, sans-serif;
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, .brand { font-family: 'Outfit', system-ui, sans-serif; }
+
+  a, button, [tabindex] { }
+  *:focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+  }
+
+  header.site {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  header.site h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--color-primary);
+  }
+
+  .tagline {
+    color: var(--color-muted-foreground);
+    margin: 0 0 32px;
+    max-width: 60ch;
+  }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  @media (min-width: 860px) {
+    main { grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .dropzone {
+    border: 2px dashed var(--color-border);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 150ms ease, background-color 150ms ease;
+    color: var(--color-muted-foreground);
+  }
+  .dropzone:hover,
+  .dropzone:focus-visible { border-color: var(--color-secondary); background: #EFF6FF; }
+  .dropzone.dragover { border-color: var(--color-secondary); background: #EFF6FF; }
+  .dropzone svg { color: var(--color-secondary); margin-bottom: 12px; }
+  .dropzone .hint { font-size: 0.85rem; margin-top: 4px; }
+  .dropzone input[type="file"] {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  .preview-block { margin-top: 20px; }
+  .preview-block img {
+    max-width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    display: block;
+  }
+  .preview-name {
+    font-size: 0.85rem;
+    color: var(--color-muted-foreground);
+    margin: 8px 0 16px;
+    word-break: break-all;
+  }
+
+  button.primary {
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color 150ms ease, opacity 150ms ease;
+  }
+  button.primary:hover:not(:disabled) { background: #16304d; }
+  button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; border-top-color: rgba(255,255,255,0.4); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results-panel { min-height: 100%; }
+  .placeholder {
+    color: var(--color-muted-foreground);
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .placeholder svg { color: var(--color-border); margin-bottom: 12px; }
+
+  .verdict {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+  }
+  .verdict.real { background: #ECFDF5; }
+  .verdict.ai { background: #FEF2F2; }
+  .verdict svg { flex-shrink: 0; }
+  .verdict.real svg { color: var(--color-accent); }
+  .verdict.ai svg { color: var(--color-destructive); }
+  .verdict .verdict-text { font-weight: 600; font-size: 1.05rem; }
+  .verdict .verdict-prob { font-size: 0.9rem; color: var(--color-muted-foreground); }
+
+  .prob-bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--color-muted);
+    overflow: hidden;
+    margin: 6px 0 20px;
+  }
+  .prob-bar-fill {
+    height: 100%;
+    background: var(--color-destructive);
+    border-radius: 999px;
+    transition: width 400ms ease;
+  }
+
+  .gradcam-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .gradcam-grid figure { margin: 0; }
+  .gradcam-grid img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    display: block;
+  }
+  .gradcam-grid figcaption {
+    font-size: 0.75rem;
+    color: var(--color-muted-foreground);
+    margin-top: 4px;
+    text-align: center;
+  }
+  .gradcam-note {
+    font-size: 0.8rem;
+    color: var(--color-muted-foreground);
+    margin: 0 0 20px;
+  }
+
+  .warning-box {
+    display: flex;
+    gap: 10px;
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    color: var(--color-warning-text);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+  }
+  .warning-box svg { flex-shrink: 0; margin-top: 1px; }
+
+  details.metadata {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 4px 14px;
+    margin-bottom: 16px;
+  }
+  details.metadata summary {
+    cursor: pointer;
+    padding: 10px 0;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 16px;
+    font-size: 0.85rem;
+    padding-bottom: 12px;
+  }
+  .meta-grid dt { color: var(--color-muted-foreground); }
+  .meta-grid dd { margin: 0; }
+  .meta-notes {
+    font-size: 0.8rem;
+    color: var(--color-muted-foreground);
+    padding: 8px 0 12px;
+    border-top: 1px solid var(--color-border);
+    margin-top: 4px;
+  }
+  .meta-notes li { margin-bottom: 4px; }
+
+  .disclaimer {
+    display: flex;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: var(--color-muted-foreground);
+    border-top: 1px solid var(--color-border);
+    padding-top: 16px;
+    margin-top: 4px;
+  }
+  .disclaimer svg { flex-shrink: 0; margin-top: 1px; }
+
+  .error-box {
+    display: flex;
+    gap: 10px;
+    background: var(--color-destructive-bg);
+    border: 1px solid #FECACA;
+    color: #991B1B;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+  }
+  .error-box svg { flex-shrink: 0; margin-top: 1px; }
+
+  [hidden] { display: none !important; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="site">
+    <svg width="28" height="28" viewBox="0 0 256 256" fill="none" aria-hidden="true">
+      <rect width="256" height="256" rx="56" fill="#1E3A5F"/>
+      <path d="M128 64L176 88V132C176 164 156 188 128 196C100 188 80 164 80 132V88L128 64Z" stroke="#F8FAFC" stroke-width="10" stroke-linejoin="round"/>
+      <path d="M112 128L124 140L148 112" stroke="#F8FAFC" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h1>AI Image Forensics</h1>
+  </header>
+  <p class="tagline">
+    Upload an image to estimate the probability it was AI-generated. This is a
+    research/portfolio tool built to show where detection works and where it
+    fails - not a certainty engine.
+  </p>
+
+  <main>
+    <section class="card" aria-labelledby="upload-heading">
+      <h2 id="upload-heading" class="sr-only">Upload an image</h2>
+
+      <div class="dropzone" id="dropzone" tabindex="0" role="button"
+           aria-label="Drag and drop an image here, or activate to browse files">
+        <svg width="36" height="36" viewBox="0 0 256 256" fill="none" aria-hidden="true" stroke="currentColor" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M96 176H72a48 48 0 0 1 0-96 8 8 0 0 0 7.9-6.7 64 64 0 0 1 126.2 0A8 8 0 0 0 214 80a40 40 0 0 1 2 80h-40"/>
+          <path d="M128 216V128"/>
+          <path d="M96 152l32-32 32 32"/>
+        </svg>
+        <div><strong>Drag &amp; drop an image</strong>, or click to browse</div>
+        <div class="hint">JPEG, PNG or WebP</div>
+        <input type="file" id="file-input" accept="image/*" aria-label="Choose an image file">
+      </div>
+
+      <div class="preview-block" id="preview-block" hidden>
+        <img id="preview-img" alt="Preview of the uploaded image">
+        <p class="preview-name" id="preview-name"></p>
+        <button class="primary" id="analyse-btn" type="button">
+          <span id="btn-spinner" class="spinner" hidden aria-hidden="true"></span>
+          <span id="btn-label">Analyse image</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card" id="results-panel" aria-live="polite" aria-labelledby="results-heading">
+      <h2 id="results-heading" class="sr-only">Analysis results</h2>
+      <div class="placeholder" id="results-placeholder">
+        <svg width="40" height="40" viewBox="0 0 256 256" fill="none" aria-hidden="true" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="32" y="48" width="192" height="160" rx="12"/>
+          <path d="M32 168l52-52a12 12 0 0 1 17 0l35 35"/>
+          <circle cx="164" cy="100" r="14"/>
+        </svg>
+        <p>Results will appear here once you analyse an image.</p>
+      </div>
+      <div id="results-content" hidden></div>
+      <div id="error-content" hidden></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  const API_BASE = window.location.hostname && window.location.hostname !== ''
+    ? 'http://localhost:8000'
+    : 'http://localhost:8000'; // change this if the API runs elsewhere
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const previewBlock = document.getElementById('preview-block');
+  const previewImg = document.getElementById('preview-img');
+  const previewName = document.getElementById('preview-name');
+  const analyseBtn = document.getElementById('analyse-btn');
+  const btnSpinner = document.getElementById('btn-spinner');
+  const btnLabel = document.getElementById('btn-label');
+  const resultsPlaceholder = document.getElementById('results-placeholder');
+  const resultsContent = document.getElementById('results-content');
+  const errorContent = document.getElementById('error-content');
+
+  let currentFile = null;
+
+  const ICONS = {
+    check: '<svg width="28" height="28" viewBox="0 0 256 256" fill="none" aria-hidden="true"><circle cx="128" cy="128" r="96" stroke="currentColor" stroke-width="14"/><path d="M88 132l28 28 52-56" stroke="currentColor" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg width="28" height="28" viewBox="0 0 256 256" fill="none" aria-hidden="true"><path d="M128 40L232 216H24L128 40Z" stroke="currentColor" stroke-width="14" stroke-linejoin="round"/><path d="M128 104v40" stroke="currentColor" stroke-width="14" stroke-linecap="round"/><circle cx="128" cy="172" r="8" fill="currentColor"/></svg>',
+    warningSmall: '<svg width="18" height="18" viewBox="0 0 256 256" fill="none"><path d="M128 40L232 216H24L128 40Z" stroke="currentColor" stroke-width="16" stroke-linejoin="round"/><path d="M128 104v40" stroke="currentColor" stroke-width="16" stroke-linecap="round"/><circle cx="128" cy="172" r="9" fill="currentColor"/></svg>',
+    shield: '<svg width="16" height="16" viewBox="0 0 256 256" fill="none"><path d="M128 32l72 24v56c0 56-32 88-72 104-40-16-72-48-72-104V56l72-24Z" stroke="currentColor" stroke-width="16" stroke-linejoin="round"/></svg>',
+    error: '<svg width="18" height="18" viewBox="0 0 256 256" fill="none"><circle cx="128" cy="128" r="96" stroke="currentColor" stroke-width="16"/><path d="M92 92l72 72M164 92l-72 72" stroke="currentColor" stroke-width="16" stroke-linecap="round"/></svg>',
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function resetPanels() {
+    resultsPlaceholder.hidden = true;
+    resultsContent.hidden = true;
+    errorContent.hidden = true;
+  }
+
+  function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    currentFile = file;
+    const url = URL.createObjectURL(file);
+    previewImg.src = url;
+    previewName.textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+    previewBlock.hidden = false;
+    resetPanels();
+    resultsPlaceholder.hidden = false;
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    })
+  );
+  dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    handleFile(file);
+  });
+
+  function setLoading(isLoading) {
+    analyseBtn.disabled = isLoading;
+    btnSpinner.hidden = !isLoading;
+    btnLabel.textContent = isLoading ? 'Analysing...' : 'Analyse image';
+    analyseBtn.setAttribute('aria-busy', String(isLoading));
+  }
+
+  function renderError(message) {
+    resetPanels();
+    errorContent.hidden = false;
+    errorContent.innerHTML = `
+      <div class="error-box" role="alert">
+        ${ICONS.error}
+        <div>${escapeHtml(message)}</div>
+      </div>`;
+  }
+
+  function renderResults(data) {
+    resetPanels();
+    resultsContent.hidden = false;
+
+    const pct = (data.probability_ai_generated * 100).toFixed(1);
+    const isAi = data.probability_ai_generated >= 0.5;
+    const verdictIcon = isAi ? ICONS.warning : ICONS.check;
+    const verdictClass = isAi ? 'ai' : 'real';
+
+    const warningsHtml = (data.reliability_warnings || []).map(w => `
+      <div class="warning-box" role="alert">
+        ${ICONS.warningSmall}
+        <div>${escapeHtml(w)}</div>
+      </div>`).join('');
+
+    const meta = data.metadata || {};
+    const metaFields = [
+      ['Format', meta.format], ['Dimensions', meta.width && meta.height ? `${meta.width} x ${meta.height}` : null],
+      ['File size', meta.file_size_bytes ? `${(meta.file_size_bytes / 1024).toFixed(0)} KB` : null],
+      ['EXIF present', meta.exif_present === undefined ? null : (meta.exif_present ? 'Yes' : 'No')],
+      ['Camera', meta.camera], ['Lens', meta.lens], ['Software', meta.software], ['Timestamp', meta.timestamp],
+    ].filter(([, v]) => v);
+
+    const metaRows = metaFields.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join('');
+    const metaNotes = (meta.notes || []).map(n => `<li>${escapeHtml(n)}</li>`).join('');
+
+    resultsContent.innerHTML = `
+      <div class="verdict ${verdictClass}">
+        ${verdictIcon}
+        <div>
+          <div class="verdict-text">${escapeHtml(data.verdict)}</div>
+          <div class="verdict-prob">${pct}% probability AI-generated</div>
+        </div>
+      </div>
+      <div class="prob-bar-track">
+        <div class="prob-bar-fill" style="width:${pct}%"></div>
+      </div>
+
+      ${data.gradcam_png_base64 ? `
+      <div class="gradcam-grid">
+        <figure>
+          <img src="${previewImg.src}" alt="Uploaded image">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="data:image/png;base64,${data.gradcam_png_base64}" alt="Grad-CAM heatmap overlay showing which regions the model was most sensitive to">
+          <figcaption>Grad-CAM (model attention)</figcaption>
+        </figure>
+      </div>
+      <p class="gradcam-note">Red indicates regions the model was sensitive to. This shows where the model looked, not why it decided.</p>
+      ` : ''}
+
+      ${warningsHtml}
+
+      ${metaFields.length || metaNotes ? `
+      <details class="metadata">
+        <summary>Image metadata</summary>
+        <dl class="meta-grid">${metaRows}</dl>
+        ${metaNotes ? `<ul class="meta-notes">${metaNotes}</ul>` : ''}
+      </details>` : ''}
+
+      <div class="disclaimer">
+        ${ICONS.shield}
+        <div>${escapeHtml(data.disclaimer || '')}</div>
+      </div>
+    `;
+  }
+
+  analyseBtn.addEventListener('click', async () => {
+    if (!currentFile) return;
+    setLoading(true);
+    resetPanels();
+
+    const form = new FormData();
+    form.append('file', currentFile);
+
+    try {
+      const res = await fetch(`${API_BASE}/analyse`, { method: 'POST', body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Request failed (${res.status})`);
+      }
+      const data = await res.json();
+      renderResults(data);
+    } catch (err) {
+      const msg = err.message === 'Failed to fetch'
+        ? `Could not reach the API at ${API_BASE}. Is it running (uvicorn src.api.main:app)?`
+        : err.message;
+      renderError(msg);
+    } finally {
+      setLoading(false);
+    }
+  });
+})();
+</script>
+</body>
+</html>
