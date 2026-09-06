@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image, ImageOps
 
 from src.data.dataset import to_tensor
+from src.metadata import extract_from_image
 from src.models.nets import build_model
 from src.utils import get_device
 
@@ -67,11 +68,17 @@ async def analyse(file: UploadFile = File(...)):
 
     raw = await file.read()
     try:
-        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        original = Image.open(io.BytesIO(raw))
+        original.load()
     except Exception:
         raise HTTPException(400, "could not read uploaded file as an image")
 
-    im = center_crop(im, state["crop"])
+    # Metadata comes from the untouched upload - convert()/crop() below would
+    # not necessarily preserve EXIF, and this is reported alongside the
+    # verdict, never folded into it (spec: no hand-weighted fusion).
+    metadata = extract_from_image(original, file.filename, len(raw))
+
+    im = center_crop(original.convert("RGB"), state["crop"])
     tensor = to_tensor(im).unsqueeze(0).to(state["device"])
 
     with torch.no_grad():
@@ -80,4 +87,5 @@ async def analyse(file: UploadFile = File(...)):
     return {
         "probability_ai_generated": round(prob, 4),
         "verdict": "likely AI-generated" if prob >= 0.5 else "likely real photograph",
+        "metadata": metadata,
     }
