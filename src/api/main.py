@@ -13,6 +13,7 @@ from pathlib import Path
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 
 from src.data.dataset import to_tensor
@@ -30,6 +31,16 @@ DISCLAIMER = (
 CHECKPOINT_PATH = Path("models/rn18_augmented.pt")
 
 app = FastAPI(title="AI Image Forensics API")
+
+# Portfolio project served locally - the frontend runs on a different port
+# (or as a file:// page) than this API, so it needs CORS to call /analyse.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
 state = {"model": None, "crop": None, "device": None, "checkpoint_error": None}
 
 
