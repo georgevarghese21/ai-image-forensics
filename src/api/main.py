@@ -7,6 +7,7 @@ POST /analyse  - upload an image, get P(AI-generated)
 
 Uploads are processed in memory only - never written to disk.
 """
+import base64
 import io
 from pathlib import Path
 
@@ -15,9 +16,16 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image, ImageOps
 
 from src.data.dataset import to_tensor
+from src.explain import grad_cam, overlay
 from src.metadata import extract_from_image
 from src.models.nets import build_model
 from src.utils import get_device
+
+DISCLAIMER = (
+    "This is a probabilistic estimate from a single automated classifier, not "
+    "proof. It can be wrong in either direction and must not be used as the "
+    "sole basis for any accusation or decision."
+)
 
 CHECKPOINT_PATH = Path("models/rn18_augmented.pt")
 
@@ -78,14 +86,35 @@ async def analyse(file: UploadFile = File(...)):
     # verdict, never folded into it (spec: no hand-weighted fusion).
     metadata = extract_from_image(original, file.filename, len(raw))
 
-    im = center_crop(original.convert("RGB"), state["crop"])
-    tensor = to_tensor(im).unsqueeze(0).to(state["device"])
+    rgb = original.convert("RGB")
+    w, h = rgb.size
+    crop = state["crop"]
+    padded = w < crop or h < crop
+    im = center_crop(rgb, crop)
 
-    with torch.no_grad():
-        prob = torch.sigmoid(state["model"](tensor)).item()
+    prob, cam = grad_cam(state["model"], to_tensor(im), state["device"])
+
+    buf = io.BytesIO()
+    overlay(im, cam).save(buf, format="PNG")
+    gradcam_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    warnings = []
+    if padded:
+        # Section 6.6 of the project's findings: padding a too-small image
+        # introduces reflection artefacts that resemble synthetic
+        # high-frequency structure and can bias the score toward "AI".
+        warnings.append(
+            f"Uploaded image ({w}x{h}) is smaller than the model's "
+            f"{crop}x{crop} input and was padded to fit. Padding artefacts "
+            "are known to bias predictions toward 'AI-generated' - treat "
+            "this result with extra caution."
+        )
 
     return {
         "probability_ai_generated": round(prob, 4),
         "verdict": "likely AI-generated" if prob >= 0.5 else "likely real photograph",
         "metadata": metadata,
+        "gradcam_png_base64": gradcam_b64,
+        "reliability_warnings": warnings,
+        "disclaimer": DISCLAIMER,
     }
