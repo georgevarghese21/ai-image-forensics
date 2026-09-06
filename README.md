@@ -326,6 +326,26 @@ generator from a single training run.
 
 Training was run on a Colab T4 (~15s/epoch for ResNet18 at this dataset size).
 
+### Running the API and frontend
+
+```bash
+# API: loads models/rn18_augmented.pt once at startup
+uvicorn src.api.main:app --reload
+
+# Frontend: any static file server works, e.g.
+python3 -m http.server 5500 --directory frontend
+```
+
+Open `http://localhost:5500` and drag an image in. `GET /health` reports
+whether the checkpoint loaded; `POST /analyse` takes a `multipart/form-data`
+upload under the field name `file` and returns probability, verdict, EXIF
+metadata, a base64 Grad-CAM overlay, reliability warnings, and a disclaimer.
+Uploads are processed in memory and never written to disk. CORS is open
+(`allow_origins=["*"]`) since this is a local single-user tool, not a
+multi-tenant service.
+
+![Frontend showing an analysed image: verdict, probability bar, Grad-CAM comparison, and metadata panel](docs/frontend/analyse-result.jpg)
+
 ---
 
 ## Limitations
