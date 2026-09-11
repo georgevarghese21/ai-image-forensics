@@ -240,6 +240,54 @@ resize figures above use the corrected implementation.
 
 ---
 
+## Out-of-distribution failure on ordinary phone photos
+
+The robustness table above measures known transformations applied to test-set
+images. It says nothing about photos the model has never seen the *distribution*
+of — an arbitrary personal phone photo, rather than one of GenImage's
+ImageNet-sourced "real" images. Two such photos (taken with a laptop camera, not
+from the dataset) were sent through the deployed API (`src/api/main.py`) to
+check.
+
+**Photo A** — two people, indoor fast-food restaurant, warm tungsten lighting:
+
+| Variant | P(AI-generated) | Verdict |
+|---|---|---|
+| Original | 0.9897 | AI-generated |
+| Center crop shifted off the face onto the background | 0.8276 | AI-generated |
+| Recompressed at JPEG q65 (approximating a messaging-app re-encode) | 0.7179 | AI-generated |
+
+**Photo B** — two people, daylight, different framing:
+
+| Variant | P(AI-generated) | Verdict |
+|---|---|---|
+| Original | 0.2151 | real photograph |
+| Recompressed at JPEG q65 | 0.0015 | real photograph |
+
+**Neither crop position nor recompression flips the verdict for either photo.**
+Photo A stays wrongly classified as AI-generated across all three conditions;
+Photo B stays correctly classified as real across both. This rules out two
+initially plausible explanations for Photo A's failure: the center crop landing
+on an uninformative patch (§Method: crop, never resize), and JPEG recompression
+from being forwarded through a messaging app.
+
+What's left is a distribution-mismatch explanation. Photo A's warm indoor
+lighting and camera pipeline differ substantially from GenImage's
+ImageNet-sourced "real" training images; Photo B's daylight framing evidently
+does not. The model is confidently wrong on Photo A independent of every
+variable tested here, consistent with the calibration finding above (§Accuracy
+and AUC diverge under degradation): a model can stay highly informative
+in-distribution while becoming confidently miscalibrated outside it.
+
+This is not fixable by inference-time post-processing — both mitigations that
+looked plausible (a smarter crop, tolerance to compression) were ruled out
+empirically above. Closing this gap needs a broader training distribution of
+"real" images covering ordinary phone-photo conditions, which needs new
+labelled data and a retrain — out of scope for this iteration. See Limitations
+and Future work.
+
+---
+
 ## Installation
 
 ```bash
@@ -278,6 +326,26 @@ generator from a single training run.
 
 Training was run on a Colab T4 (~15s/epoch for ResNet18 at this dataset size).
 
+### Running the API and frontend
+
+```bash
+# API: loads models/rn18_augmented.pt once at startup
+uvicorn src.api.main:app --reload
+
+# Frontend: any static file server works, e.g.
+python3 -m http.server 5500 --directory frontend
+```
+
+Open `http://localhost:5500` and drag an image in. `GET /health` reports
+whether the checkpoint loaded; `POST /analyse` takes a `multipart/form-data`
+upload under the field name `file` and returns probability, verdict, EXIF
+metadata, a base64 Grad-CAM overlay, reliability warnings, and a disclaimer.
+Uploads are processed in memory and never written to disk. CORS is open
+(`allow_origins=["*"]`) since this is a local single-user tool, not a
+multi-tenant service.
+
+![Frontend showing an analysed image: verdict, probability bar, Grad-CAM comparison, and metadata panel](docs/frontend/analyse-result.jpg)
+
 ---
 
 ## Limitations
@@ -309,6 +377,12 @@ in-distribution. Degraded-input evaluation proved far more discriminative.
 **Pretrained backbone overlap.** ResNet18's ImageNet pretraining shares a data
 source with GenImage's real class. Not leakage in the strict sense, but a
 confound worth noting.
+
+**Narrow "real" distribution.** GenImage's real images are ImageNet-sourced.
+Ordinary phone photos with different lighting and camera pipelines can fall
+outside that distribution and be confidently misclassified regardless of crop
+position or compression — see §Out-of-distribution failure on ordinary phone
+photos.
 
 ---
 
@@ -353,8 +427,10 @@ outputs first.
 In priority order: hold out an entire architecture class (GAN vs diffusion) by
 lowering the crop threshold or sourcing larger GAN images; multiple seeds with
 confidence intervals; quality-conditional thresholding to address the
-calibration finding; scaling to the full 28,000-image dataset; and frequency-domain
-analysis as an independent second signal.
+calibration finding; broadening the "real" training distribution with ordinary
+phone photos to close the out-of-distribution gap; scaling to the full
+28,000-image dataset; and frequency-domain analysis as an independent second
+signal.
 
 ---
 
